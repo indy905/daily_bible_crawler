@@ -61,4 +61,4 @@ poetry.lock
 texts/*
 *.log
 
-.mypi_cache/
+.mypy_cache/
