@@ -57,3 +57,6 @@ poetry.lock
 .docker/
 *.tar
 *.tar.gz
+
+texts/*
+*.log
