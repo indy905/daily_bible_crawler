@@ -19,12 +19,21 @@ from tenacity import retry, wait_exponential, stop_after_attempt
 import requests
 
 # 환경 변수에서 설정 가져오기
-EMAIL_SENDER = os.environ.get('EMAIL_SENDER', 'indy0524@gmail.com')
+EMAIL_SENDER = os.environ.get('EMAIL_SENDER')
 EMAIL_PASSWORD = os.environ.get('EMAIL_PASSWORD')  # 앱 비밀번호로 사용 가능
-EMAIL_RECIPIENT = os.environ.get('EMAIL_RECIPIENT', 'indy9052@naver.com')
+EMAIL_RECIPIENT = os.environ.get('EMAIL_RECIPIENT')  # 콤마로 구분된 이메일 주소 목록
 EMAIL_APP_PASSWORD = os.environ.get('EMAIL_APP_PASSWORD')  # Gmail 앱 비밀번호 
-OAUTH_TOKEN_PATH = os.environ.get('OAUTH_TOKEN_PATH', 'token.pickle')  # OAuth 토큰 저장 경로
-OAUTH_CREDENTIALS_PATH = os.environ.get('OAUTH_CREDENTIALS_PATH', 'credentials.json')  # OAuth 인증 정보 경로
+
+# 이메일 수신자 목록 처리 (콤마로 구분된 이메일 주소를 리스트로 변환)
+EMAIL_RECIPIENTS = []
+if EMAIL_RECIPIENT:
+    EMAIL_RECIPIENTS = [email.strip() for email in EMAIL_RECIPIENT.split(',') if email.strip()]
+    logger.info(f"이메일 수신자 {len(EMAIL_RECIPIENTS)}명이 설정되었습니다.")
+
+# 현재 스크립트의 디렉토리 경로를 기준으로 절대 경로 설정
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+OAUTH_TOKEN_PATH = os.environ.get('OAUTH_TOKEN_PATH', os.path.join(SCRIPT_DIR, 'token.pickle'))  # OAuth 토큰 저장 경로
+OAUTH_CREDENTIALS_PATH = os.environ.get('OAUTH_CREDENTIALS_PATH', os.path.join(SCRIPT_DIR, 'credentials.json'))  # OAuth 인증 정보 경로
 
 # 웹사이트 URL 상수 정의
 WEBSITE_URL = "https://sum.su.or.kr:8888/bible/today"
@@ -68,32 +77,33 @@ def send_email_with_app_password(subject, html_content):
         html_content (str): HTML 형식의 이메일 내용
     """
     try:
-        if not EMAIL_SENDER or not EMAIL_APP_PASSWORD or not EMAIL_RECIPIENT:
+        if not EMAIL_SENDER or not EMAIL_APP_PASSWORD or not EMAIL_RECIPIENTS:
             logger.warning("이메일 전송에 필요한 앱 비밀번호 설정이 없습니다.")
             return
+        
+        for recipient in EMAIL_RECIPIENTS:
+            msg = MIMEMultipart()
+            msg['From'] = EMAIL_SENDER
+            msg['To'] = recipient
+            msg['Subject'] = subject
             
-        msg = MIMEMultipart()
-        msg['From'] = EMAIL_SENDER
-        msg['To'] = EMAIL_RECIPIENT
-        msg['Subject'] = subject
-        
-        # 간단한 본문 텍스트 추가
-        plain_text = "오늘의 성경 말씀과 해설을 첨부파일로 보내드립니다. 첨부된 HTML 파일을 열어 확인해 주세요."
-        msg.attach(MIMEText(plain_text, 'plain', 'utf-8'))
-        
-        # HTML 파일 첨부
-        today_date = datetime.now().strftime('%Y%m%d')
-        html_attachment = MIMEText(html_content, 'html', 'utf-8')
-        html_attachment.add_header('Content-Disposition', 'attachment', 
-                                   filename=f'bible_content_{today_date}.html')
-        msg.attach(html_attachment)
-        
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-            # 앱 비밀번호 사용
-            server.login(EMAIL_SENDER, EMAIL_APP_PASSWORD)
-            server.send_message(msg)
-        
-        logger.info(f"앱 비밀번호로 이메일 전송 완료: {subject}")
+            # 간단한 본문 텍스트 추가
+            plain_text = "오늘의 성경 말씀과 해설을 첨부파일로 보내드립니다. 첨부된 HTML 파일을 열어 확인해 주세요."
+            msg.attach(MIMEText(plain_text, 'plain', 'utf-8'))
+            
+            # HTML 파일 첨부
+            today_date = datetime.now().strftime('%Y%m%d')
+            html_attachment = MIMEText(html_content, 'html', 'utf-8')
+            html_attachment.add_header('Content-Disposition', 'attachment', 
+                                    filename=f'bible_content_{today_date}.html')
+            msg.attach(html_attachment)
+            
+            with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+                # 앱 비밀번호 사용
+                server.login(EMAIL_SENDER, EMAIL_APP_PASSWORD)
+                server.send_message(msg)
+            
+            logger.info(f"앱 비밀번호로 이메일 전송 완료: {subject} -> {recipient}")
         
     except Exception as e:
         logger.error(f"앱 비밀번호 이메일 전송 중 오류 발생: {str(e)}")
@@ -140,31 +150,32 @@ def send_email_with_oauth2(subject, html_content):
         # Gmail API 서비스 생성
         service = build('gmail', 'v1', credentials=creds)
         
-        # 이메일 메시지 생성
-        message = MIMEMultipart()
-        message['to'] = EMAIL_RECIPIENT
-        message['from'] = EMAIL_SENDER
-        message['subject'] = subject
-        
-        # 간단한 본문 텍스트 추가
-        plain_text = "오늘의 성경 말씀과 해설을 첨부파일로 보내드립니다. 첨부된 HTML 파일을 열어 확인해 주세요."
-        message.attach(MIMEText(plain_text, 'plain', 'utf-8'))
-        
-        # HTML 파일 첨부
-        today_date = datetime.now().strftime('%Y%m%d')
-        html_attachment = MIMEText(html_content, 'html', 'utf-8')
-        html_attachment.add_header('Content-Disposition', 'attachment', 
-                                   filename=f'bible_content_{today_date}.html')
-        message.attach(html_attachment)
-        
-        # 메시지를 바이트로 변환하고 base64로 인코딩
-        raw = base64.urlsafe_b64encode(message.as_bytes())
-        raw = raw.decode()
-        body = {'raw': raw}
-        
-        # 메시지 전송
-        message = (service.users().messages().send(userId='me', body=body).execute())
-        logger.info(f"OAuth2로 이메일 전송 완료: {subject} (메시지 ID: {message['id']})")
+        for recipient in EMAIL_RECIPIENTS:
+            # 이메일 메시지 생성
+            message = MIMEMultipart()
+            message['to'] = recipient
+            message['from'] = EMAIL_SENDER
+            message['subject'] = subject
+            
+            # 간단한 본문 텍스트 추가
+            plain_text = "오늘의 성경 말씀과 해설을 첨부파일로 보내드립니다. 첨부된 HTML 파일을 열어 확인해 주세요."
+            message.attach(MIMEText(plain_text, 'plain', 'utf-8'))
+            
+            # HTML 파일 첨부
+            today_date = datetime.now().strftime('%Y%m%d')
+            html_attachment = MIMEText(html_content, 'html', 'utf-8')
+            html_attachment.add_header('Content-Disposition', 'attachment', 
+                                    filename=f'bible_content_{today_date}.html')
+            message.attach(html_attachment)
+            
+            # 메시지를 바이트로 변환하고 base64로 인코딩
+            raw = base64.urlsafe_b64encode(message.as_bytes())
+            raw = raw.decode()
+            body = {'raw': raw}
+            
+            # 메시지 전송
+            message_result = (service.users().messages().send(userId='me', body=body).execute())
+            logger.info(f"OAuth2로 이메일 전송 완료: {subject} -> {recipient} (메시지 ID: {message_result['id']})")
         
     except HttpError as error:
         logger.error(f"OAuth2 이메일 전송 중 API 오류 발생: {error}")

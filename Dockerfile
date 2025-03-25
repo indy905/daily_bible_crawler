@@ -4,7 +4,16 @@ FROM python:3.11-slim
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
+    locales \
     && rm -rf /var/lib/apt/lists/*
+
+# 한국어 로케일 설정
+RUN sed -i '/ko_KR.UTF-8/s/^# //g' /etc/locale.gen && \
+    locale-gen
+
+ENV LANG=ko_KR.UTF-8
+ENV LANGUAGE=ko_KR:ko
+ENV LC_ALL=ko_KR.UTF-8
 
 # Poetry 설치
 RUN pip install poetry
@@ -16,23 +25,18 @@ WORKDIR /app
 RUN poetry config virtualenvs.create false
 
 # 프로젝트 파일 복사
-COPY pyproject.toml poetry.lock README.md ./
-COPY daily_bible_crawler ./daily_bible_crawler
-COPY tests ./tests
+COPY pyproject.toml poetry.lock ./
+COPY daily_bible_crawler ./daily_bible_crawler/
 
-# 의존성 설치 (개발 의존성 제외)
-RUN poetry install --without dev --no-root
+# 의존성 설치
+RUN poetry install --no-root
 
 # Playwright 설치 및 브라우저 설치
 RUN poetry run playwright install chromium
 RUN poetry run playwright install-deps
 
-# 구글 인증 파일 복사
-COPY daily_bible_crawler/token.json ./daily_bible_crawler/
-COPY daily_bible_crawler/credentials.json ./daily_bible_crawler/
-
-# 스크린샷 저장 디렉토리 생성
-RUN mkdir -p screenshots
+# 필요한 디렉토리 생성
+RUN mkdir -p screenshots texts
 
 # 실행 명령
 CMD ["poetry", "run", "python", "-m", "daily_bible_crawler.main"] 
